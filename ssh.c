@@ -39,13 +39,16 @@ int server_fd;
 int sigfd;
 
 int main(int argc, char **argv) {
-    int epfd = epoll_create1(EPOLL_CLOEXEC);
 
     unsigned short port;
     if (argc == 1) {
+        fprintf(stderr, "Usage: ssh <remote_address> <port>\nPort is optional (default to 10987)\n");
+        exit(EXIT_FAILURE);
+    }
+    if (argc == 2) {
         port = DEFAULT_PORT;
-    } else {
-        int p = atoi(*(argv + 1));
+    } else if (argc == 3) {
+        int p = atoi(argv[2]);
         if (p < 1 || p > USHRT_MAX) {
             fprintf(stderr, "Invalid port range.\n");
             exit(1);
@@ -64,13 +67,18 @@ int main(int argc, char **argv) {
         exit(EXIT_FAILURE);
     }
     struct sockaddr_in sa;
-    sa.sin_addr.s_addr = INADDR_ANY;
+
+    int rv = inet_pton(AF_INET, argv[1], &sa.sin_addr.s_addr);
+    if (rv == 0) {
+        fprintf(stderr, "Invalid remote address\n");
+        exit(EXIT_FAILURE);
+    }
     sa.sin_family = AF_INET;
     sa.sin_port = htons(port);
 
-    int rv = connect(server_fd, (struct sockaddr *)&sa, sizeof(sa));
+    rv = connect(server_fd, (struct sockaddr *)&sa, sizeof(sa));
     if (rv == -1) {
-        perror("connect ossoso");
+        perror("connect");
         exit(EXIT_FAILURE);
     }
 
@@ -92,6 +100,8 @@ int main(int argc, char **argv) {
         perror("sigprocmask");
         exit(EXIT_FAILURE);
     }
+
+    int epfd = epoll_create1(EPOLL_CLOEXEC);
 
     struct epoll_event server_event = {0};
     server_event.events = EPOLLIN | EPOLLHUP | EPOLLRDHUP | EPOLLERR;
@@ -159,7 +169,7 @@ int main(int argc, char **argv) {
                 }
             } else if (event.data.fd == sigfd) {
                 struct signalfd_siginfo s;
-                int n = read(sigfd, &s, sizeof(s));
+                read(sigfd, &s, sizeof(s));
                 send_win_size();
             }
         } else {
