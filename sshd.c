@@ -3,17 +3,20 @@
 #include <arpa/inet.h>
 #include <asm-generic/ioctls.h>
 #include <asm-generic/socket.h>
+#include <bits/types/sigset_t.h>
 #include <fcntl.h>
 #include <limits.h>
 #include <netdb.h>
 #include <netinet/in.h>
 #include <pthread.h>
 #include <pty.h>
+#include <signal.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/epoll.h>
 #include <sys/ioctl.h>
+#include <sys/signalfd.h>
 #include <sys/socket.h>
 #include <sys/types.h>
 #include <sys/wait.h>
@@ -29,11 +32,13 @@ typedef int fd_t;
 const fd_t client_fdt = 0;
 const fd_t master_fdt = 1;
 const fd_t server_fdt = 2;
+const fd_t signal_fdt = 3;
 typedef struct Connection {
     fd_t fd_type;
     int master_fd;
     int client_fd;
     int server_fd;
+    int signal_fd;
     struct Connection *other;
 } Connection;
 
@@ -107,6 +112,19 @@ int main(int argc, char **argv) {
 
     reg_conn(server_conn);
 
+    sigset_t mask;
+    sigemptyset(&mask);
+    sigaddset(&mask, SIGCHLD);
+    if (sigprocmask(SIG_BLOCK, &mask, NULL) == -1) {
+        perror("sigprocmask");
+        exit(EXIT_FAILURE);
+    }
+    int sigfd = signalfd(-1, &mask, 0);
+    Connection *signal_conn = malloc(sizeof(Connection));
+    signal_conn->fd_type = signal_fdt;
+    signal_conn->signal_fd = sigfd;
+
+    reg_conn(signal_conn);
     for (;;) {
         if (epoll_wait(epfd, &event, 1, -1) == -1) {
             perror("epoll_wait");
@@ -122,6 +140,10 @@ int main(int argc, char **argv) {
                 recvfrom_client(conn);
             } else if (conn->fd_type == master_fdt) {
                 recvfrom_pty(conn);
+            } else if (conn->fd_type == signal_fdt) {
+                struct signalfd_siginfo si;
+                read(sigfd, &si, sizeof(si));
+                free_child_procs();
             } else {
                 fprintf(stderr, "Unexpected fd type: %d\n", conn->fd_type);
                 exit(EXIT_FAILURE);
@@ -132,9 +154,8 @@ int main(int argc, char **argv) {
     }
 }
 void free_child_procs() {
-    while (waitpid(-1, NULL, WNOHANG) > 0) {
+    if (waitpid(-1, NULL, WNOHANG) > 0)
         printf("Child process freed\n");
-    }
 }
 
 void reg_conn(Connection *conn) {
