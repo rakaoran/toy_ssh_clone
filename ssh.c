@@ -84,9 +84,6 @@ int main(int argc, char **argv) {
     }
 
     freeaddrinfo(res);
-    conn = proto_new(server_fd);
-
-    send_win_size();
 
     enable_raw_mode();
     atexit(disable_raw_mode);
@@ -105,11 +102,14 @@ int main(int argc, char **argv) {
         exit(EXIT_FAILURE);
     }
 
+    conn = proto_new(server_fd);
+
+    send_win_size();
     int epfd = epoll_create1(EPOLL_CLOEXEC);
 
     struct epoll_event server_event = {0};
     server_event.events = EPOLLIN | EPOLLHUP | EPOLLRDHUP | EPOLLERR;
-    server_event.data.ptr = conn;
+    server_event.data.fd = server_fd;
     if (epoll_ctl(epfd, EPOLL_CTL_ADD, server_fd, &server_event)) {
         perror("epollctl add serverfd");
         exit(EXIT_FAILURE);
@@ -132,8 +132,8 @@ int main(int argc, char **argv) {
     }
 
     struct epoll_event event;
-    char packedbuf[10000];
-    char buf[10000];
+    char packetbuf[MAX_PACKET_SIZE];
+    char buf[MAX_PAYLOAD_SIZE];
     char c;
     for (;;) {
         rv = epoll_wait(epfd, &event, 1, -1);
@@ -143,15 +143,16 @@ int main(int argc, char **argv) {
         }
         if (event.events & (EPOLLIN)) {
             if (event.data.fd == server_fd) {
-                int n = proto_read(conn, buf, sizeof(buf));
-                if (n < 0) {
-                    perror("read from server");
-                    break;
-                }
-                rv = write(STDOUT_FILENO, buf, n);
-                if (rv == -1) {
-                    perror("write to stdout");
-                    break;
+                int n;
+                while ((n = proto_read(conn, buf, sizeof(buf))) > 0) {
+                    if (n < 0) {
+                        break;
+                    }
+                    rv = write(STDOUT_FILENO, buf, n);
+                    if (rv == -1) {
+                        perror("write to stdout");
+                        break;
+                    }
                 }
             } else if (event.data.fd == STDIN_FILENO) {
                 int n = read(STDIN_FILENO, &c, 1);
@@ -162,11 +163,11 @@ int main(int argc, char **argv) {
                 if (n == 0) {
                     break;
                 }
-                int packet_size = pack(&c, 1, COMMAND, packedbuf, sizeof(packedbuf));
-                rv = proto_write(conn, packedbuf, packet_size);
+                int packet_size = pack(&c, 1, COMMAND, packetbuf, sizeof(packetbuf));
+                rv = proto_write(conn, packetbuf, packet_size);
                 if (rv < 0) {
-                    perror("read from server");
-                    break;
+                    fprintf(stderr, "write to server failed\n");
+                    exit(EXIT_FAILURE);
                 }
             } else if (event.data.fd == sigfd) {
                 struct signalfd_siginfo s;

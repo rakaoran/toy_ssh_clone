@@ -133,9 +133,12 @@ int main(int argc, char **argv) {
             if (conn->fd_type == server_fdt) {
                 int cfd = accept4(server_fd, NULL, NULL, SOCK_CLOEXEC);
                 handle_new_conn(cfd);
+                printf("got server packet\n");
             } else if (conn->fd_type == client_fdt) {
+                printf("got client packet\n");
                 recvfrom_client(conn);
             } else if (conn->fd_type == master_fdt) {
+                printf("got master packet\n");
                 recvfrom_pty(conn);
             } else if (conn->fd_type == signal_fdt) {
                 struct signalfd_siginfo si;
@@ -281,6 +284,7 @@ void recvfrom_pty(connection *conn) {
         unreg_conn(conn);
         return;
     }
+    printf("sending from pty %d bytes to client\n", n);
     int rv = proto_write(conn->other->proto_conn, buf, n);
     if (rv < 0) {
         unreg_conn(conn);

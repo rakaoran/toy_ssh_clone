@@ -37,6 +37,7 @@ static int queue_bytes(proto_conn *conn, char *buf, size_t len) {
     if (conn->outlen - conn->pending_out < len) {
         return -1;
     }
+    printf("queueing\n");
     int head = (conn->out_ptr + conn->pending_out) % conn->outlen;
 
     if (head + len - 1 >= conn->outlen) {
@@ -183,8 +184,8 @@ int proto_write(proto_conn *conn, char *buf, size_t len) {
     uint16_t packlen = len + 2;
 
     char packet[len + 2];
-    uint16_t headerlen = htons(len + 2);
-    memcpy(packet, &headerlen, 2);
+    uint16_t header = htons(len + 2);
+    memcpy(packet, &header, 2);
     memcpy(packet + 2, buf, len);
 
     if (rv > 0) {
@@ -202,6 +203,8 @@ int proto_write(proto_conn *conn, char *buf, size_t len) {
         }
         total += sentnow;
     }
-
+    if (total == packlen) {
+        return 0;
+    }
     return queue_bytes(conn, packet + total, packlen - total);
 }
