@@ -1,4 +1,5 @@
 #define _GNU_SOURCE
+#include "protocol.h"
 #include "stdio.h"
 #include <arpa/inet.h>
 #include <asm-generic/ioctls.h>
@@ -32,15 +33,15 @@ enum fd_t { client_fdt, master_fdt, server_fdt, signal_fdt };
 typedef struct _connection {
     enum fd_t fd_type;
     int master_fd;
-    int client_fd;
     int server_fd;
     int signal_fd;
+    proto_conn *proto_conn;
     struct _connection *other;
 } connection;
 
 void recvfrom_client(connection *conn);
 void recvfrom_pty(connection *conn);
-void free_child_procs();
+void free_child_proc();
 void reg_conn(connection *conn);
 void unreg_conn(connection *conn);
 void handle_new_conn(int cfd);
@@ -48,7 +49,7 @@ void handle_new_conn(int cfd);
 int epfd;
 int conn_count = 0;
 int server_fd;
-char buf[10000];
+char buf[MAX_PAYLOAD_SIZE];
 
 int main(int argc, char **argv) {
     char *port;
@@ -86,7 +87,7 @@ int main(int argc, char **argv) {
     }
 
     if (p == NULL) {
-        fprintf(stderr, "Could not bind");
+        fprintf(stderr, "Could not bind\n");
         exit(EXIT_FAILURE);
     }
 
@@ -139,7 +140,7 @@ int main(int argc, char **argv) {
             } else if (conn->fd_type == signal_fdt) {
                 struct signalfd_siginfo si;
                 read(sigfd, &si, sizeof(si));
-                free_child_procs();
+                free_child_proc();
             } else {
                 fprintf(stderr, "Unexpected fd type: %d\n", conn->fd_type);
                 exit(EXIT_FAILURE);
@@ -149,7 +150,7 @@ int main(int argc, char **argv) {
         }
     }
 }
-void free_child_procs() {
+void free_child_proc() {
     if (waitpid(-1, NULL, WNOHANG) > 0)
         printf("Child process freed\n");
 }
@@ -158,8 +159,8 @@ void reg_conn(connection *conn) {
     struct epoll_event event = {.events = EPOLLIN | EPOLLRDHUP, .data.ptr = conn};
     switch (conn->fd_type) {
     case client_fdt:
-        epoll_ctl(epfd, EPOLL_CTL_ADD, conn->client_fd, &event);
-        printf("client fd %d registered\n", conn->client_fd);
+        epoll_ctl(epfd, EPOLL_CTL_ADD, conn->proto_conn->tcp_fd, &event);
+        printf("client fd %d registered\n", conn->proto_conn->tcp_fd);
         conn_count++;
         break;
 
@@ -175,22 +176,24 @@ void reg_conn(connection *conn) {
         break;
     }
 }
+
 void unreg_conn(connection *conn) {
     connection *other_conn = conn->other;
     switch (conn->fd_type) {
     case client_fdt:
-        epoll_ctl(epfd, EPOLL_CTL_DEL, conn->client_fd, NULL);
+        epoll_ctl(epfd, EPOLL_CTL_DEL, conn->proto_conn->tcp_fd, NULL);
         epoll_ctl(epfd, EPOLL_CTL_DEL, other_conn->master_fd, NULL);
-        close(conn->client_fd);
-        printf("fd %d closed\n", conn->client_fd);
+        close(conn->proto_conn->tcp_fd);
+        printf("fd %d closed\n", conn->proto_conn->tcp_fd);
         close(other_conn->master_fd);
+        proto_free(conn->proto_conn);
         break;
     case master_fdt:
-        epoll_ctl(epfd, EPOLL_CTL_DEL, other_conn->client_fd, NULL);
+        epoll_ctl(epfd, EPOLL_CTL_DEL, other_conn->proto_conn->tcp_fd, NULL);
         epoll_ctl(epfd, EPOLL_CTL_DEL, conn->master_fd, NULL);
         close(conn->master_fd);
-        close(other_conn->client_fd);
-        printf("fd %d closed\n", other_conn->client_fd);
+        close(other_conn->proto_conn->tcp_fd);
+        printf("fd %d closed\n", other_conn->proto_conn->tcp_fd);
         break;
     case server_fdt:
         break;
@@ -225,14 +228,12 @@ void handle_new_conn(int cfd) {
     } else if (pid > 0) {
         connection *master_conn = malloc(sizeof(connection));
         connection *client_conn = malloc(sizeof(connection));
-        master_conn->other = client_conn;
         client_conn->other = master_conn;
-        master_conn->fd_type = master_fdt;
+        master_conn->other = client_conn;
         client_conn->fd_type = client_fdt;
-        master_conn->client_fd = cfd;
-        client_conn->client_fd = cfd;
+        client_conn->proto_conn = proto_new(cfd);
         master_conn->master_fd = masterfd;
-        client_conn->master_fd = masterfd;
+        master_conn->fd_type = master_fdt;
         reg_conn(client_conn);
         reg_conn(master_conn);
     } else {
@@ -243,76 +244,45 @@ void handle_new_conn(int cfd) {
 }
 
 void recvfrom_client(connection *conn) {
-    uint32_t len;
-    int n = recv(conn->client_fd, &len, sizeof(len), MSG_PEEK);
-    if (n <= 0) {
-        unreg_conn(conn);
-        return;
-    }
-
-    len = ntohl(len);
-    if (len > sizeof(buf)) {
-        printf("packet too large\n");
-        unreg_conn(conn);
-        return;
-    }
-    n = read(conn->client_fd, buf, len);
-    if (n != (int)len) {
-        printf("truncated packet! aborting...\n");
-        unreg_conn(conn);
-        return;
-    }
-    int unpackedlen = len - 1 - sizeof(uint32_t);
-    if (*(buf + sizeof(uint32_t)) == COMMAND) {
-        n = write(conn->master_fd, buf + 1 + sizeof(uint32_t), unpackedlen);
-        if (n <= 0) {
-            unreg_conn(conn);
-            return;
-        }
-    } else if (*(buf + sizeof(uint32_t)) == WINSIZE) {
-        uint16_t col;
-        uint16_t row;
-        uint16_t *p = (uint16_t *)(buf + sizeof(uint32_t) + 1);
-        col = *(uint16_t *)(p);
-        row = *(uint16_t *)(p + 1);
-        struct winsize ws;
-        ws.ws_col = ntohs(col);
-        ws.ws_row = ntohs(row);
-        if (ioctl(conn->master_fd, TIOCSWINSZ, &ws) == -1) {
-            n = -1;
-            perror("ioctl");
-            return;
+    int n;
+    while ((n = proto_read(conn->proto_conn, buf, sizeof(buf))) > 0) {
+        if (*buf == COMMAND) {
+            int written = write(conn->other->master_fd, buf + 1, n - 1);
+            if (written <= 0) {
+                unreg_conn(conn);
+                return;
+            }
+        } else if (*buf == WINSIZE) {
+            uint16_t col;
+            uint16_t row;
+            uint16_t *p = (uint16_t *)(buf + sizeof(uint32_t) + 1);
+            col = *(uint16_t *)(p);
+            row = *(uint16_t *)(p + 1);
+            struct winsize ws;
+            ws.ws_col = ntohs(col);
+            ws.ws_row = ntohs(row);
+            if (ioctl(conn->other->master_fd, TIOCSWINSZ, &ws) == -1) {
+                n = -1;
+                perror("ioctl");
+                return;
+            }
+        } else {
+            fprintf(stderr, "Unexpected packet thing, ignoring!\n");
         }
     }
     if (n == -1) {
         unreg_conn(conn);
-        return;
     }
-}
-
-int send_all(int fd, char *buf, ssize_t n, int opts) {
-    int total = 0;
-    char *p = buf;
-    while (total != n) {
-        int sentnow = send(fd, p + total, n - total, opts);
-        if (sentnow == -1) {
-            return -1;
-        }
-        total += sentnow;
-    }
-    return total;
 }
 
 void recvfrom_pty(connection *conn) {
-    char buf[10000];
     int n = read(conn->master_fd, buf, sizeof(buf));
     if (n <= 0) {
         unreg_conn(conn);
         return;
     }
-    n = send_all(conn->client_fd, buf, n, MSG_NOSIGNAL | MSG_DONTWAIT);
-    if (n == -1) {
+    int rv = proto_write(conn->other->proto_conn, buf, n);
+    if (rv < 0) {
         unreg_conn(conn);
-        return;
     }
 }

@@ -1,18 +1,18 @@
-all: bin/sshd bin/ssh
+all: client server
 
-bin/sshd: sshd.c
+server: sshd.c protocol.c protocol.h
 	@mkdir -p bin
-	clang -Wall -Wextra -g -O0 sshd.c -o bin/sshd 
+	clang -Wall -Wextra -g -O0 protocol.c sshd.c -o bin/sshd 
 
-bin/ssh: ssh.c
+client: ssh.c protocol.c protocol.h
 	@mkdir -p bin
-	@clang -Wall -Wextra -g -O0 ssh.c -o bin/ssh
+	@clang -Wall -Wextra -g -O0 ssh.c protocol.c -o bin/ssh
 
-run-server: bin/sshd
+run-server: server
 	@./bin/sshd
 
-run-client: bin/ssh
-	@./bin/ssh
+run-client: client
+	@./bin/ssh localhost
 
 clean:
 	@rm -rf bin

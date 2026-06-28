@@ -2,24 +2,27 @@
 #include <sys/types.h>
 
 #define MAX_PACKET_SIZE 16 * 1024
+#define MAX_PAYLOAD_SIZE (16 * 1024) - 2
+#define INBUF_SIZE 1024 * 1024
+#define OUTBUF_SIZE 5 * 1024 * 1024
 
-typedef struct _connection {
+typedef struct _proto_conn {
     int tcp_fd;
     char *inbuf;
-    int16_t inlen;
     char *outbuf;
-    int16_t outlen;
-    int16_t pending_in;
-    int16_t pending_out;
-    int16_t in_ptr;
-    int16_t out_ptr;
-} connection;
+    size_t inlen;
+    size_t outlen;
+    size_t pending_in;
+    size_t pending_out;
+    size_t in_ptr;
+    size_t out_ptr;
+} proto_conn;
 
 // Takes address, port and return a file descriptor.
 // int proto_listen(char *address, char *port);
 
-int queue_bytes(connection *conn, char *buf, ssize_t len);
-int proto_flush(connection *conn);
-int proto_load(connection *conn);
-int proto_read(connection *conn, char *buf, ssize_t len);
-int proto_write(connection *conn, char *buf, ssize_t len);
+int proto_flush(proto_conn *conn);
+int proto_read(proto_conn *conn, char *buf, size_t len);
+int proto_write(proto_conn *conn, char *buf, size_t len);
+proto_conn *proto_new(int tcp_fd);
+void proto_free(proto_conn *con);

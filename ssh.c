@@ -1,3 +1,4 @@
+#include "protocol.h"
 #include <arpa/inet.h>
 #include <asm-generic/errno-base.h>
 #include <asm-generic/ioctls.h>
@@ -37,6 +38,7 @@ void get_win_size(uint16_t *col, uint16_t *row);
 
 int server_fd;
 int sigfd;
+proto_conn *conn;
 
 int main(int argc, char **argv) {
 
@@ -77,11 +79,12 @@ int main(int argc, char **argv) {
     }
 
     if (p == NULL) {
-        fprintf(stderr, "Could not connect");
+        fprintf(stderr, "Could not connect\n");
         exit(EXIT_FAILURE);
     }
 
     freeaddrinfo(res);
+    conn = proto_new(server_fd);
 
     send_win_size();
 
@@ -106,7 +109,7 @@ int main(int argc, char **argv) {
 
     struct epoll_event server_event = {0};
     server_event.events = EPOLLIN | EPOLLHUP | EPOLLRDHUP | EPOLLERR;
-    server_event.data.fd = server_fd;
+    server_event.data.ptr = conn;
     if (epoll_ctl(epfd, EPOLL_CTL_ADD, server_fd, &server_event)) {
         perror("epollctl add serverfd");
         exit(EXIT_FAILURE);
@@ -140,17 +143,14 @@ int main(int argc, char **argv) {
         }
         if (event.events & (EPOLLIN)) {
             if (event.data.fd == server_fd) {
-                int n = read(server_fd, buf, sizeof(buf));
-                if (n == -1) {
+                int n = proto_read(conn, buf, sizeof(buf));
+                if (n < 0) {
                     perror("read from server");
-                    break;
-                }
-                if (n == 0) {
                     break;
                 }
                 rv = write(STDOUT_FILENO, buf, n);
                 if (rv == -1) {
-                    perror("read from server");
+                    perror("write to stdout");
                     break;
                 }
             } else if (event.data.fd == STDIN_FILENO) {
@@ -163,8 +163,8 @@ int main(int argc, char **argv) {
                     break;
                 }
                 int packet_size = pack(&c, 1, COMMAND, packedbuf, sizeof(packedbuf));
-                rv = send(server_fd, packedbuf, packet_size, MSG_NOSIGNAL);
-                if (rv == -1) {
+                rv = proto_write(conn, packedbuf, packet_size);
+                if (rv < 0) {
                     perror("read from server");
                     break;
                 }
@@ -205,8 +205,8 @@ int send_win_size() {
     *winsize = htons(ws.ws_col);
     *(winsize + 1) = htons(ws.ws_row);
     uint32_t n = pack((char *)winsize, sizeof(winsize), WINSIZE, packedbuf, sizeof(packedbuf));
-    int err = send(server_fd, packedbuf, n, MSG_NOSIGNAL);
-    if (err == -1) {
+    int err = proto_write(conn, packedbuf, n);
+    if (err < 0) {
         perror("send winsize");
         return err;
     }
@@ -214,12 +214,11 @@ int send_win_size() {
 }
 
 uint32_t pack(char *inbuf, uint16_t in_size, char type, char *outbuf, uint16_t out_size) {
-    uint32_t total_size = in_size + 1 + sizeof(uint32_t);
+    uint32_t total_size = in_size + 1;
     if (out_size < total_size) {
         return -1;
     }
-    *((uint32_t *)(outbuf)) = htonl(total_size);
-    *(outbuf + sizeof(uint32_t)) = type;
-    memcpy((outbuf + 1 + sizeof(uint32_t)), inbuf, in_size);
+    *outbuf = type;
+    memcpy(outbuf + 1, inbuf, in_size);
     return total_size;
 }
