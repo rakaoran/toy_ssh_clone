@@ -1,26 +1,13 @@
 #define _GNU_SOURCE
 #include "protocol.h"
 #include "stdio.h"
-#include <arpa/inet.h>
-#include <asm-generic/ioctls.h>
-#include <asm-generic/socket.h>
-#include <fcntl.h>
-#include <limits.h>
 #include <netdb.h>
-#include <netinet/in.h>
-#include <pthread.h>
 #include <pty.h>
-#include <signal.h>
-#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/epoll.h>
-#include <sys/ioctl.h>
 #include <sys/signalfd.h>
-#include <sys/socket.h>
-#include <sys/types.h>
 #include <sys/wait.h>
-#include <unistd.h>
 
 #define DEFAULT_PORT "10987"
 #define MAX_CONNECTIONS 10

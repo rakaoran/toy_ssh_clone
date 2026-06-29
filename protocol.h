@@ -1,4 +1,3 @@
-#include <stdint.h>
 #include <sys/types.h>
 
 #ifndef MAX_PACKET_SIZE

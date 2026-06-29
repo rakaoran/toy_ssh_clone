@@ -1,14 +1,14 @@
 #include "protocol.h"
 #include <arpa/inet.h>
-#include <asm-generic/errno-base.h>
-#include <asm-generic/errno.h>
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/socket.h>
 #include <sys/types.h>
-#include <unistd.h>
+
+ssize_t send(int sockfd, const void *buf, size_t size, int flags) {
+    return -1;
+}
 
 proto_conn *proto_new(int tcp_fd) {
     proto_conn *p = malloc(sizeof(proto_conn));
