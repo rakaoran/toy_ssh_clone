@@ -143,6 +143,7 @@ int main(int argc, char **argv) {
         }
         if (event.events & (EPOLLIN)) {
             if (event.data.fd == server_fd) {
+                proto_load(conn);
                 int n;
                 while ((n = proto_read(conn, buf, sizeof(buf))) > 0) {
                     if (n < 0) {
@@ -153,6 +154,12 @@ int main(int argc, char **argv) {
                         perror("write to stdout");
                         break;
                     }
+                    if (rv != n) {
+                        printf("rietmorietmroitmroetmrsieotmrstmsoitmrsietmrsietmrtmrstmrsietmstmstmsrml\n");
+                    }
+                }
+                if (n == -1) {
+                    break;
                 }
             } else if (event.data.fd == STDIN_FILENO) {
                 int n = read(STDIN_FILENO, &c, 1);

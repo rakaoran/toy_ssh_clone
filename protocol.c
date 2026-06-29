@@ -37,7 +37,7 @@ static int queue_bytes(proto_conn *conn, char *buf, size_t len) {
     if (conn->outlen - conn->pending_out < len) {
         return -1;
     }
-    printf("queueing\n");
+
     int head = (conn->out_ptr + conn->pending_out) % conn->outlen;
 
     if (head + len - 1 >= conn->outlen) {
@@ -80,7 +80,7 @@ int proto_flush(proto_conn *conn) {
     return 0;
 }
 
-static int proto_load(proto_conn *conn) {
+int proto_load(proto_conn *conn) {
     size_t available_space = conn->inlen - conn->pending_in;
     if (available_space == 0) {
         return 0;
@@ -100,8 +100,9 @@ static int proto_load(proto_conn *conn) {
     } else {
         ssize_t n = recv(conn->tcp_fd, conn->inbuf + head, conn->inlen - head, MSG_DONTWAIT);
         if (n <= 0) {
-            if (n == -1 && (errno == EAGAIN || errno == EWOULDBLOCK))
+            if (n == -1 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
                 return 0;
+            }
             return -1;
         }
 
@@ -126,10 +127,6 @@ PACKET:
 */
 int proto_read(proto_conn *conn, char *buf, size_t len) {
 
-    if (proto_load(conn) < 0) {
-        return -1;
-    }
-
     if (conn->pending_in <= 2) {
         return 0;
     }
@@ -140,9 +137,11 @@ int proto_read(proto_conn *conn, char *buf, size_t len) {
     memcpy(p + 1, conn->inbuf + next, 1);
     packlen = ntohs(packlen);
     if (packlen > MAX_PACKET_SIZE) {
+        printf("max packet size\n");
         return -1;
     }
     if (packlen <= 2) {
+        printf("packlen <= 2\n");
         return -1;
     }
     if (packlen > conn->pending_in) {
@@ -150,6 +149,7 @@ int proto_read(proto_conn *conn, char *buf, size_t len) {
     }
     uint16_t payloadlen = packlen - 2;
     if (len < payloadlen) {
+        printf("len < payloadlen\n");
         return -1;
     }
     conn->in_ptr = (conn->in_ptr + 2) % conn->inlen;

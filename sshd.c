@@ -133,12 +133,9 @@ int main(int argc, char **argv) {
             if (conn->fd_type == server_fdt) {
                 int cfd = accept4(server_fd, NULL, NULL, SOCK_CLOEXEC);
                 handle_new_conn(cfd);
-                printf("got server packet\n");
             } else if (conn->fd_type == client_fdt) {
-                printf("got client packet\n");
                 recvfrom_client(conn);
             } else if (conn->fd_type == master_fdt) {
-                printf("got master packet\n");
                 recvfrom_pty(conn);
             } else if (conn->fd_type == signal_fdt) {
                 struct signalfd_siginfo si;
@@ -149,6 +146,7 @@ int main(int argc, char **argv) {
                 exit(EXIT_FAILURE);
             }
         } else {
+            printf("unregistering because we got a hangup\n");
             unreg_conn(conn);
         }
     }
@@ -226,7 +224,7 @@ void handle_new_conn(int cfd) {
     int masterfd;
     int pid = forkpty(&masterfd, NULL, NULL, NULL);
     if (pid == 0) {
-        execlp("bash", "bash", NULL);
+        execlp("bash", "bash", "-i", NULL);
         perror("execlp(bash)");
     } else if (pid > 0) {
         connection *master_conn = malloc(sizeof(connection));
@@ -248,12 +246,17 @@ void handle_new_conn(int cfd) {
 
 void recvfrom_client(connection *conn) {
     int n;
+    proto_load(conn->proto_conn);
     while ((n = proto_read(conn->proto_conn, buf, sizeof(buf))) > 0) {
         if (*buf == COMMAND) {
             int written = write(conn->other->master_fd, buf + 1, n - 1);
             if (written <= 0) {
+                printf("unregistering because we couldn't write to master\n");
                 unreg_conn(conn);
                 return;
+            }
+            if (written != n - 1) {
+                printf("rietmorietmroitmroetmrsieotmrstmsoitmrsietmrsietmrtmrstmrsietmstmstmsrml\n");
             }
         } else if (*buf == WINSIZE) {
             uint16_t col;
@@ -265,15 +268,17 @@ void recvfrom_client(connection *conn) {
             ws.ws_col = ntohs(col);
             ws.ws_row = ntohs(row);
             if (ioctl(conn->other->master_fd, TIOCSWINSZ, &ws) == -1) {
-                n = -1;
+                printf("unregistering because we couldn't write to master\n");
+                unreg_conn(conn);
                 perror("ioctl");
-                return;
+                break;
             }
         } else {
             fprintf(stderr, "Unexpected packet thing, ignoring!\n");
         }
     }
     if (n == -1) {
+        printf("unregistering because proto_read returned -1\n");
         unreg_conn(conn);
     }
 }
@@ -281,12 +286,13 @@ void recvfrom_client(connection *conn) {
 void recvfrom_pty(connection *conn) {
     int n = read(conn->master_fd, buf, sizeof(buf));
     if (n <= 0) {
+        printf("unregistering because we couldn't read from master fd \n");
         unreg_conn(conn);
         return;
     }
-    printf("sending from pty %d bytes to client\n", n);
     int rv = proto_write(conn->other->proto_conn, buf, n);
     if (rv < 0) {
+        printf("unregistering because we write to client with proto_write from recvfrom_pty \n");
         unreg_conn(conn);
     }
 }

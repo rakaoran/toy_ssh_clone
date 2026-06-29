@@ -1,10 +1,21 @@
 #include <stdint.h>
 #include <sys/types.h>
 
-#define MAX_PACKET_SIZE 16 * 1024
-#define MAX_PAYLOAD_SIZE (16 * 1024) - 2
-#define INBUF_SIZE 1024 * 1024
-#define OUTBUF_SIZE 5 * 1024 * 1024
+#ifndef MAX_PACKET_SIZE
+#define MAX_PACKET_SIZE (16 * 1024)
+#endif
+
+#ifndef MAX_PAYLOAD_SIZE
+#define MAX_PAYLOAD_SIZE ((16 * 1024) - 2)
+#endif
+
+#ifndef INBUF_SIZE
+#define INBUF_SIZE (1024 * 1024)
+#endif
+
+#ifndef OUTBUF_SIZE
+#define OUTBUF_SIZE (5 * 1024 * 1024)
+#endif
 
 typedef struct _proto_conn {
     int tcp_fd;
@@ -22,6 +33,7 @@ typedef struct _proto_conn {
 // int proto_listen(char *address, char *port);
 
 int proto_flush(proto_conn *conn);
+int proto_load(proto_conn *conn);
 int proto_read(proto_conn *conn, char *buf, size_t len);
 int proto_write(proto_conn *conn, char *buf, size_t len);
 proto_conn *proto_new(int tcp_fd);
